@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VibeVision AI — BLIP Image Captioning & OCR</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          animation: {
+            'blob': 'blob 12s infinite alternate',
+            'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+          },
+          keyframes: {
+            blob: {
+              '0%': { transform: 'translate(0px, 0px) scale(1)' },
+              '33%': { transform: 'translate(30px, -40px) scale(1.08)' },
+              '66%': { transform: 'translate(-20px, 20px) scale(0.95)' },
+              '100%': { transform: 'translate(0px, 0px) scale(1)' },
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      background-color: #06080f;
+      color: #f1f5f9;
+      overflow-x: hidden;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 50px -15px rgba(0, 0, 0, 0.6);
+    }
+    .glass-card {
+      background: rgba(30, 41, 59, 0.4);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .neon-glow-violet {
+      box-shadow: 0 0 25px -5px rgba(139, 92, 246, 0.45);
+    }
+    .neon-glow-cyan {
+      box-shadow: 0 0 25px -5px rgba(6, 182, 212, 0.45);
+    }
+    .grid-bg {
+      background-size: 40px 40px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    }
+    /* Кастомный скроллбар */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.4);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(139, 92, 246, 0.4);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(139, 92, 246, 0.7);
+    }
+  </style>
+</head>
+<body class="min-h-screen grid-bg relative selection:bg-violet-500/30 selection:text-violet-200">
+
+  <!-- Фоновые неоновые сферы -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
+    <div class="absolute -top-32 -left-24 w-96 h-96 bg-violet-600/20 rounded-full blur-[120px] animate-blob"></div>
+    <div class="absolute top-1/3 -right-24 w-96 h-96 bg-cyan-500/15 rounded-full blur-[120px] animate-blob" style="animation-delay: 3s;"></div>
+    <div class="absolute -bottom-32 left-1/3 w-96 h-96 bg-fuchsia-600/15 rounded-full blur-[120px] animate-blob" style="animation-delay: 6s;"></div>
+  </div>
+
+  <!-- Всплывающее уведомление (Toast) -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+    <div class="glass-panel px-4 py-3 rounded-2xl border border-emerald-500/30 flex items-center gap-3 shadow-2xl">
+      <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+      <span id="toast-text" class="text-sm font-medium text-slate-100">Скопировано в буфер обмена</span>
+    </div>
+  </div>
+
+  <!-- Основной контейнер -->
+  <div class="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+    
+    <!-- Шапка -->
+    <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+      <div class="flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-cyan-400 p-[1px] shadow-lg shadow-violet-500/25">
+          <div class="w-full h-full bg-slate-950 rounded-2xl flex items-center justify-center">
+            <svg class="w-6 h-6 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center gap-2.5">
+            <h1 class="text-xl sm:text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+              VibeVision Studio
+            </h1>
+            <span class="px-2 py-0.5 text-[11px] font-mono uppercase tracking-wider rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/30">
+              v2.6
+            </span>
+          </div>
+          <p class="text-xs sm:text-sm text-slate-400 mt-0.5">
+            BLIP Image Captioning + AI Vision OCR прямо в вашем браузере
+          </p>
+        </div>
+      </div>
+
+      <!-- Подсказка горячих клавиш -->
+      <div class="flex items-center gap-2 px-3.5 py-2 rounded-xl glass-card text-xs text-slate-300">
+        <span class="text-cyan-400">⚡</span>
+        <span>Вставьте скриншот из буфера:</span>
+        <kbd class="px-1.5 py-0.5 font-mono text-[11px] bg-slate-800 border border-slate-700 rounded-md text-slate-200">Ctrl + V</kbd>
+      </div>
+    </header>
+
+    <!-- Переключатель режимов работы -->
+    <div class="glass-panel rounded-3xl p-2 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" role="tablist">
+        <!-- Режим 1: BLIP Base -->
+        <button id="mode-blip-btn" type="button" onclick="setMode('blip')"
+          class="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl text-left transition-all duration-300 bg-gradient-to-r from-violet-600/25 to-fuchsia-600/20 border border-violet-500/40 neon-glow-violet">
+          <div class="flex items-center gap-3.5">
+            <div class="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-400/30 flex items-center justify-center text-violet-300 shrink-0">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
+              </svg>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-sm sm:text-base text-white">BLIP Base</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-500/25 text-violet-200 border border-violet-400/30">Локально в браузере</span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">Transformers.js • <code class="font-mono text-violet-300">Xenova/blip-image-captioning-base</code></p>
+            </div>
+          </div>
+          <span id="blip-status-dot" class="w-2.5 h-2.5 rounded-full bg-violet-400 shrink-0"></span>
+        </button>
+
+        <!-- Режим 2: AI Vision Pro (OCR) -->
+        <button id="mode-vision-btn" type="button" onclick="setMode('vision')"
+          class="group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl text-left transition-all duration-300 hover:bg-slate-800/40 border border-transparent">
+          <div class="flex items-center gap-3.5">
+            <div class="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/25 flex items-center justify-center text-cyan-300 shrink-0">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+              </svg>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-semibold text-sm sm:text-base text-slate-200 group-hover:text-white">AI Vision Pro</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-200 border border-cyan-400/30">Быстрый + OCR</span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">Детальное описание на русском + чтение текста с фото</p>
+            </div>
+          </div>
+          <span id="vision-status-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600 shrink-0"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Основная рабочая сетка -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Левая колонка: Загрузка и предпросмотр изображения (5 колонок) -->
+      <div class="lg:col-span-5 flex flex-col gap-4">
+        <div class="glass-panel rounded-3xl p-5 flex flex-col h-full">
+          <div class="flex items-center justify-between mb-3.5">
+            <span class="text-xs font-mono uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+              01. Исходное изображение
+            </span>
+            <button id="clear-image-btn" type="button" onclick="clearImage()" class="hidden text-xs font-medium text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 px-2.5 py-1 rounded-xl transition">
+              Очистить
+            </button>
+          </div>
+
+          <!-- Зона Drag & Drop / Вставки -->
+          <div id="drop-zone"
+            class="relative flex-1 min-h-[280px] sm:min-h-[320px] rounded-2xl border-2 border-dashed border-slate-700/80 hover:border-violet-400/60 bg-slate-950/40 transition-all duration-300 flex flex-col items-center justify-center p-6 text-center cursor-pointer group overflow-hidden">
+            
+            <input id="file-input" type="file" accept="image/*" class="hidden" />
+
+            <!-- Состояние пустой зоны -->
+            <div id="drop-placeholder" class="flex flex-col items-center max-w-xs transition-transform duration-300 group-hover:scale-[1.02]">
+              <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-violet-500/20 to-cyan-500/20 border border-white/10 flex items-center justify-center mb-4 text-violet-300 group-hover:text-cyan-300 transition-colors">
+                <svg class="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+              </div>
+              <p class="text-sm font-medium text-slate-200 mb-1">
+                Перетащите изображение сюда
+              </p>
+              <p class="text-xs text-slate-400 mb-4">
+                или нажмите для выбора файла, либо вставьте скриншот через <span class="text-slate-200 font-mono">Ctrl+V</span>
+              </p>
+              <span class="px-4 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 transition">
+                Выбрать файл с устройства
+              </span>
+            </div>
+
+            <!-- Предпросмотр загруженного фото -->
+            <div id="preview-wrapper" class="hidden w-full h-full flex flex-col items-center justify-center">
+              <div class="relative w-full rounded-xl overflow-hidden bg-slate-950/80 border border-white/10 flex items-center justify-center max-h-[300px]">
+                <img id="preview-img" src="" alt="Предпросмотр" class="max-h-[300px] w-auto object-contain rounded-xl" />
+              </div>
+              <div id="image-meta" class="w-full flex items-center justify-between text-[11px] font-mono text-slate-400 mt-3 px-1">
+                <span id="meta-name" class="truncate max-w-[180px]">image.png</span>
+                <span id="meta-dims">0 × 0 px</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Кнопка запуска анализа -->
+          <button id="analyze-btn" type="button" onclick="runProcessing()" disabled
+            class="mt-4 w-full py-3.5 px-5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2.5 transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed bg-gradient-to-r from-violet-600 via-fuchsia-600 to-cyan-500 hover:brightness-110 text-white shadow-lg shadow-violet-600/25">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+            </svg>
+            <span id="analyze-btn-text">Сгенерировать описание</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Правая колонка: Прогресс и результат (7 колонок) -->
+      <div class="lg:col-span-7 flex flex-col gap-4">
+        <div class="glass-panel rounded-3xl p-5 sm:p-6 flex flex-col h-full justify-between">
+          <div>
+            <!-- Верхняя панель карточки результата -->
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <span class="text-xs font-mono uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-violet-400"></span>
+                02. Результат нейросети
+              </span>
+
+              <div class="flex items-center gap-2">
+                <!-- Индикатор времени -->
+                <div id="timer-badge" class="hidden items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800/80 border border-white/10 text-xs font-mono text-cyan-300">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span id="timer-value">0.00 с</span>
+                </div>
+
+                <!-- Кнопка копирования -->
+                <button id="copy-result-btn" type="button" onclick="copyCurrentResult()" disabled
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed border border-white/10 text-slate-200 transition">
+                  <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  <span>Копировать</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Блок прогресса загрузки весов BLIP Base -->
+            <div id="model-progress-box" class="hidden mb-5 p-4 rounded-2xl bg-violet-950/30 border border-violet-500/30">
+              <div class="flex items-center justify-between text-xs mb-2">
+                <span id="progress-label" class="font-medium text-violet-200 flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-violet-400 animate-ping"></span>
+                  Загрузка весов Xenova/blip-image-captioning-base...
+                </span>
+                <span id="progress-percent" class="font-mono text-violet-300">0%</span>
+              </div>
+              <div class="w-full h-2 rounded-full bg-slate-900 overflow-hidden p-[1px]">
+                <div id="progress-bar" class="h-full rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-400 transition-all duration-200" style="width: 0%"></div>
+              </div>
+              <p id="progress-file" class="text-[11px] font-mono text-slate-400 mt-1.5 truncate">Инициализация ONNX Runtime Web...</p>
+            </div>
+
+            <!-- Состояние ожидания (Placeholder) -->
+            <div id="result-empty" class="min-h-[260px] rounded-2xl border border-white/5 bg-slate-950/30 flex flex-col items-center justify-center p-6 text-center">
+              <div class="w-12 h-12 rounded-2xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-500 mb-3">
+                <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                </svg>
+              </div>
+              <p class="text-sm text-slate-300 font-medium">Здесь появится описание и распознанный текст</p>
+              <p class="text-xs text-slate-500 mt-1 max-w-sm">
+                Загрузите картинку слева и выберите режим: локальный BLIP Base или AI Vision Pro для глубокого анализа и OCR.
+              </p>
+            </div>
+
+            <!-- Скелетон загрузки при инференсе -->
+            <div id="result-loading" class="hidden min-h-[260px] rounded-2xl border border-white/10 bg-slate-950/40 p-6 flex flex-col justify-center gap-4">
+              <div class="flex items-center gap-3">
+                <div class="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+                <span id="loading-status-text" class="text-sm font-medium text-cyan-300">Нейросеть анализирует изображение...</span>
+              </div>
+              <div class="space-y-2.5 animate-pulse">
+                <div class="h-3.5 bg-slate-800 rounded-full w-3/4"></div>
+                <div class="h-3.5 bg-slate-800 rounded-full w-full"></div>
+                <div class="h-3.5 bg-slate-800 rounded-full w-5/6"></div>
+              </div>
+            </div>
+
+            <!-- Контейнер готового результата -->
+            <div id="result-content" class="hidden space-y-4">
+              <!-- Блок 1: Основное описание -->
+              <div class="p-4 sm:p-5 rounded-2xl bg-slate-950/50 border border-white/10">
+                <div class="flex items-center justify-between mb-2">
+                  <span id="result-primary-label" class="text-[11px] font-mono uppercase tracking-wider text-violet-300">
+                    BLIP Caption (EN)
+                  </span>
+                  <button id="translate-blip-btn" type="button" onclick="translateBlipCaption()"
+                    class="hidden text-[11px] font-medium text-cyan-300 hover:text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 px-2.5 py-0.5 rounded-lg transition">
+                    Перевести на русский ✨
+                  </button>
+                </div>
+                <p id="result-primary-text" class="text-base sm:text-lg font-medium text-white leading-relaxed selection:bg-cyan-500/30"></p>
+                
+                <!-- Перевод BLIP на русский (появляется по клику) -->
+                <div id="blip-translation-box" class="hidden mt-3 pt-3 border-t border-white/10">
+                  <span class="text-[11px] font-mono uppercase tracking-wider text-cyan-300 block mb-1">Перевод на русский</span>
+                  <p id="blip-translation-text" class="text-sm text-slate-200 leading-relaxed"></p>
+                </div>
+              </div>
+
+              <!-- Блок 2: Распознанный текст на изображении (OCR) -->
+              <div id="ocr-section" class="hidden p-4 sm:p-5 rounded-2xl bg-cyan-950/20 border border-cyan-500/25">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-[11px] font-mono uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+                    </svg>
+                    Распознанный текст на фото (OCR)
+                  </span>
+                  <button type="button" onclick="copyOcrOnly()" class="text-[11px] text-slate-300 hover:text-white underline decoration-cyan-500/50">
+                    Копировать текст
+                  </button>
+                </div>
+                <pre id="result-ocr-text" class="text-sm font-mono text-slate-200 whitespace-pre-wrap break-words bg-slate-950/60 p-3 rounded-xl border border-white/5 max-h-44 overflow-y-auto"></pre>
+              </div>
+
+              <!-- Блок 3: Ключевые теги -->
+              <div id="tags-section" class="hidden flex flex-wrap gap-1.5 pt-1"></div>
+            </div>
+          </div>
+
+          <!-- Нижняя информационная строка -->
+          <div class="mt-6 pt-3.5 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 font-mono">
+            <span id="engine-info">Движок: Transformers.js (WebAssembly / WebGPU)</span>
+            <span>Приватность: фото не сохраняются на сервере</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Секция истории текущей сессии -->
+    <section class="mt-8 glass-panel rounded-3xl p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2.5">
+          <h2 class="text-sm font-semibold text-slate-200">История сессии</h2>
+          <span id="history-count" class="px-2 py-0.5 text-xs font-mono rounded-full bg-slate-800 text-slate-300 border border-white/10">0</span>
+        </div>
+        <button id="clear-history-btn" type="button" onclick="clearHistory()" class="hidden text-xs text-slate-400 hover:text-rose-400 transition">
+          Очистить историю
+        </button>
+      </div>
+
+      <div id="history-empty" class="text-xs text-slate-500 py-6 text-center border border-dashed border-white/5 rounded-2xl">
+        Обработанные изображения появятся здесь. Нажмите на карточку, чтобы мгновенно скопировать результат.
+      </div>
+
+      <div id="history-grid" class="hidden grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5"></div>
+    </section>
+
+  </div>
+
+  <!-- Скрипт приложения -->
+  <script type="module">
+    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+    // Настройка Transformers.js для работы в браузере через Hugging Face Hub CDN
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
+
+    // Состояние приложения
+    const state = {
+      mode: 'blip', // 'blip' | 'vision'
+      imageDataUrl: null,
+      imageBase64: null,
+      imageMimeType: 'image/png',
+      imageName: '',
+      blipPipeline: null,
+      isModelLoading: false,
+      lastResultText: '',
+      lastOcrText: '',
+      history: []
+    };
+
+    // DOM-элементы
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const dropPlaceholder = document.getElementById('drop-placeholder');
+    const previewWrapper = document.getElementById('preview-wrapper');
+    const previewImg = document.getElementById('preview-img');
+    const clearImageBtn = document.getElementById('clear-image-btn');
+    const analyzeBtn = document.getElementById('analyze-btn');
+    const analyzeBtnText = document.getElementById('analyze-btn-text');
+
+    // Экспортируем функции в window для обработчиков onclick
+    window.setMode = function(newMode) {
+      state.mode = newMode;
+      const blipBtn = document.getElementById('mode-blip-btn');
+      const visionBtn = document.getElementById('mode-vision-btn');
+      const blipDot = document.getElementById('blip-status-dot');
+      const visionDot = document.getElementById('vision-status-dot');
+      const engineInfo = document.getElementById('engine-info');
+
+      if (newMode === 'blip') {
+        blipBtn.className = 'group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl text-left transition-all duration-300 bg-gradient-to-r from-violet-600/25 to-fuchsia-600/20 border border-violet-500/40 neon-glow-violet';
+        visionBtn.className = 'group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl text-left transition-all duration-300 hover:bg-slate-800/40 border border-transparent';
+        blipDot.className = 'w-2.5 h-2.5 rounded-full bg-violet-400 shrink-0';
+        visionDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-600 shrink-0';
+        analyzeBtnText.textContent = 'Сгенерировать BLIP Caption';
+        engineInfo.textContent = 'Движок: Transformers.js • Xenova/blip-image-captioning-base';
+      } else {
+        visionBtn.className = 'group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl text-left transition-all duration-300 bg-gradient-to-r from-cyan-600/25 to-blue-600/20 border border-cyan-500/40 neon-glow-cyan';
+        blipBtn.className = 'group relative flex items-center justify-between p-3.5 sm:p-4 rounded-2xl text-left transition-all duration-300 hover:bg-slate-800/40 border border-transparent';
+        visionDot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-400 shrink-0';
+        blipDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-600 shrink-0';
+        analyzeBtnText.textContent = 'Распознать сцену и текст (OCR)';
+        engineInfo.textContent = 'Движок: Gemini 3 Flash Vision • Мультимодальный анализ + OCR';
+      }
+    };
+
+    // Показ Toast-уведомления
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      const toastText = document.getElementById('toast-text');
+      toastText.textContent = message;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 2800);
+    }
+
+    // Копирование текста в буфер обмена (надежный способ для iframe)
+    function copyTextToClipboard(text, successMsg = 'Скопировано в буфер обмена') {
+      if (!text) return;
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        showToast(successMsg);
+      } catch (err) {
+        showToast('Не удалось скопировать текст');
+      }
+      document.body.removeChild(textarea);
+    }
+
+    window.copyCurrentResult = function() {
+      copyTextToClipboard(state.lastResultText, 'Результат скопирован!');
+    };
+
+    window.copyOcrOnly = function() {
+      copyTextToClipboard(state.lastOcrText, 'Распознанный текст скопирован!');
+    };
+
+    // Обработка загруженного файла изображения
+    function handleImageFile(file) {
+      if (!file || !file.type.startsWith('image/')) {
+        showToast('Пожалуйста, выберите корректный файл изображения');
+        return;
+      }
+
+      state.imageName = file.name || `clipboard_${new Date().toLocaleTimeString('ru-RU').replace(/:/g, '-')}.png`;
+      state.imageMimeType = file.type;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        state.imageDataUrl = dataUrl;
+        state.imageBase64 = dataUrl.split(',')[1];
+
+        previewImg.onload = () => {
+          document.getElementById('meta-name').textContent = state.imageName;
+          document.getElementById('meta-dims').textContent = `${previewImg.naturalWidth} × ${previewImg.naturalHeight} px`;
+        };
+        previewImg.src = dataUrl;
+
+        dropPlaceholder.classList.add('hidden');
+        previewWrapper.classList.remove('hidden');
+        clearImageBtn.classList.remove('hidden');
+        analyzeBtn.disabled = false;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // Очистка изображения
+    window.clearImage = function() {
+      state.imageDataUrl = null;
+      state.imageBase64 = null;
+      fileInput.value = '';
+      previewImg.src = '';
+      previewWrapper.classList.add('hidden');
+      dropPlaceholder.classList.remove('hidden');
+      clearImageBtn.classList.add('hidden');
+      analyzeBtn.disabled = true;
+    };
+
+    // События Drag & Drop и выбора файла
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleImageFile(e.target.files[0]);
+      }
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('border-cyan-400', 'bg-cyan-950/20');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('border-cyan-400', 'bg-cyan-950/20');
+      });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const files = e.dataTransfer?.files;
+      if (files && files[0]) {
+        handleImageFile(files[0]);
+      }
+    });
+
+    // Глобальная вставка из буфера обмена (Ctrl+V / Cmd+V)
+    window.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const blob = item.getAsFile();
+          if (blob) {
+            handleImageFile(blob);
+            showToast('Изображение вставлено из буфера обмена');
+            break;
+          }
+        }
+      }
+    });
+
+    // Загрузка и кэширование локальной модели BLIP Base
+    async function getBlipPipeline() {
+      if (state.blipPipeline) return state.blipPipeline;
+
+      const progressBox = document.getElementById('model-progress-box');
+      const progressBar = document.getElementById('progress-bar');
+      const progressPercent = document.getElementById('progress-percent');
+      const progressFile = document.getElementById('progress-file');
+
+      progressBox.classList.remove('hidden');
+      state.isModelLoading = true;
+
+      try {
+        state.blipPipeline = await pipeline('image-to-text', 'Xenova/blip-image-captioning-base', {
+          progress_callback: (data) => {
+            if (data.status === 'progress' && data.progress != null) {
+              const pct = Math.round(data.progress);
+              progressBar.style.width = `${pct}%`;
+              progressPercent.textContent = `${pct}%`;
+              if (data.file) {
+                progressFile.textContent = `Загрузка файла: ${data.file}`;
+              }
+            } else if (data.status === 'ready') {
+              progressBar.style.width = '100%';
+              progressPercent.textContent = '100%';
+              progressFile.textContent = 'Модель готова к работе!';
+            }
+          }
+        });
+        setTimeout(() => progressBox.classList.add('hidden'), 800);
+        return state.blipPipeline;
+      } catch (error) {
+        progressBox.classList.add('hidden');
+        throw error;
+      } finally {
+        state.isModelLoading = false;
+      }
+    }
+
+    // Вспомогательная функция вызова Gemini API с экспоненциальной задержкой
+    async function fetchGeminiWithBackoff(payload, maxRetries = 4) {
+      const apiKey = "";
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          return await response.json();
+        } catch (err) {
+          if (attempt === maxRetries) throw err;
+          const delay = Math.pow(2, attempt) * 1000;
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    // Запуск обработки изображения в выбранном режиме
+    window.runProcessing = async function() {
+      if (!state.imageDataUrl) return;
+
+      const resultEmpty = document.getElementById('result-empty');
+      const resultLoading = document.getElementById('result-loading');
+      const resultContent = document.getElementById('result-content');
+      const loadingStatusText = document.getElementById('loading-status-text');
+      const timerBadge = document.getElementById('timer-badge');
+      const timerValue = document.getElementById('timer-value');
+      const copyBtn = document.getElementById('copy-result-btn');
+
+      // Сброс UI перед стартом
+      resultEmpty.classList.add('hidden');
+      resultContent.classList.add('hidden');
+      resultLoading.classList.remove('hidden');
+      analyzeBtn.disabled = true;
+      copyBtn.disabled = true;
+      document.getElementById('blip-translation-box').classList.add('hidden');
+
+      const startTime = performance.now();
+
+      try {
+        if (state.mode === 'blip') {
+          loadingStatusText.textContent = state.blipPipeline
+            ? 'Локальный инференс BLIP Base...'
+            : 'Подготовка локальной модели BLIP Base в браузере...';
+
+          const captioner = await getBlipPipeline();
+          loadingStatusText.textContent = 'Генерация текстового описания...';
+
+          const output = await captioner(state.imageDataUrl, {
+            max_new_tokens: 60,
+          });
+
+          const captionText = output?.[0]?.generated_text?.trim() || 'Не удалось сформировать описание.';
+          const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+
+          renderBlipResult(captionText, elapsed);
+          addToHistory({
+            thumb: state.imageDataUrl,
+            mode: 'BLIP Base',
+            text: captionText,
+            ocr: '',
+            elapsed
+          });
+        } else {
+          loadingStatusText.textContent = 'AI Vision Pro: анализ сцены и распознавание текста (OCR)...';
+
+          const payload = {
+            contents: [{
+              role: 'user',
+              parts: [
+                {
+                  text: "Проанализируй это изображение. 1) Дай подробное, точное и понятное описание на русском языке того, что изображено на картинке (объекты, действия, атмосфера, интерфейс или контекст). 2) Если на изображении присутствует любой текст (надписи, вывески, код, скриншот переписки, документы, мемы), максимально точно извлеки его дословно в поле extractedText (если текста нет — верни пустую строку). 3) Добавь 3-5 коротких тегов на русском языке."
+                },
+                {
+                  inlineData: {
+                    mimeType: state.imageMimeType,
+                    data: state.imageBase64
+                  }
+                }
+              ]
+            }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  description: { type: "STRING" },
+                  extractedText: { type: "STRING" },
+                  tags: {
+                    type: "ARRAY",
+                    items: { type: "STRING" }
+                  }
+                },
+                required: ["description", "extractedText", "tags"]
+              }
+            }
+          };
+
+          const result = await fetchGeminiWithBackoff(payload);
+          const rawJson = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!rawJson) throw new Error('Пустой ответ от модели');
+
+          const parsed = JSON.parse(rawJson);
+          const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+
+          renderVisionResult(parsed, elapsed);
+          addToHistory({
+            thumb: state.imageDataUrl,
+            mode: 'Vision Pro',
+            text: parsed.description,
+            ocr: parsed.extractedText || '',
+            elapsed
+          });
+        }
+
+        timerBadge.classList.remove('hidden');
+        timerBadge.classList.add('flex');
+        copyBtn.disabled = false;
+      } catch (err) {
+        console.error(err);
+        resultLoading.classList.add('hidden');
+        resultEmpty.classList.remove('hidden');
+        showToast('Ошибка при обработке изображения. Попробуйте ещё раз.');
+      } finally {
+        analyzeBtn.disabled = false;
+      }
+    };
+
+    // Отрисовка результата BLIP Base
+    function renderBlipResult(caption, elapsed) {
+      document.getElementById('result-loading').classList.add('hidden');
+      document.getElementById('result-content').classList.remove('hidden');
+
+      document.getElementById('result-primary-label').textContent = 'BLIP Base Caption (Оригинал)';
+      document.getElementById('result-primary-label').className = 'text-[11px] font-mono uppercase tracking-wider text-violet-300';
+      document.getElementById('result-primary-text').textContent = caption;
+      document.getElementById('translate-blip-btn').classList.remove('hidden');
+
+      document.getElementById('ocr-section').classList.add('hidden');
+      document.getElementById('tags-section').classList.add('hidden');
+      document.getElementById('timer-value').textContent = `${elapsed} с`;
+
+      state.lastResultText = caption;
+      state.lastOcrText = '';
+    }
+
+    // Быстрый перевод BLIP-описания на русский
+    window.translateBlipCaption = async function() {
+      const btn = document.getElementById('translate-blip-btn');
+      const box = document.getElementById('blip-translation-box');
+      const textEl = document.getElementById('blip-translation-text');
+
+      if (!state.lastResultText) return;
+      btn.disabled = true;
+      btn.textContent = 'Переводим...';
+
+      try {
+        const payload = {
+          contents: [{
+            parts: [{
+              text: `Переведи это краткое описание изображения на естественный русский язык. Верни только перевод без кавычек и пояснений: "${state.lastResultText}"`
+            }]
+          }]
+        };
+        const res = await fetchGeminiWithBackoff(payload);
+        const translated = res?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (translated) {
+          textEl.textContent = translated;
+          box.classList.remove('hidden');
+          state.lastResultText = `${state.lastResultText}\n(${translated})`;
+        }
+      } catch (e) {
+        showToast('Не удалось перевести описание');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Перевести на русский ✨';
+      }
+    };
+
+    // Отрисовка результата AI Vision Pro + OCR
+    function renderVisionResult(data, elapsed) {
+      document.getElementById('result-loading').classList.add('hidden');
+      document.getElementById('result-content').classList.remove('hidden');
+
+      document.getElementById('result-primary-label').textContent = 'AI Vision Pro • Описание сцены';
+      document.getElementById('result-primary-label').className = 'text-[11px] font-mono uppercase tracking-wider text-cyan-300';
+      document.getElementById('result-primary-text').textContent = data.description;
+      document.getElementById('translate-blip-btn').classList.add('hidden');
+      document.getElementById('timer-value').textContent = `${elapsed} с`;
+
+      const ocrSection = document.getElementById('ocr-section');
+      const ocrTextEl = document.getElementById('result-ocr-text');
+      const cleanOcr = (data.extractedText || '').trim();
+
+      if (cleanOcr.length > 0) {
+        ocrTextEl.textContent = cleanOcr;
+        ocrSection.classList.remove('hidden');
+        state.lastOcrText = cleanOcr;
+        state.lastResultText = `${data.description}\n\nРаспознанный текст:\n${cleanOcr}`;
+      } else {
+        ocrSection.classList.add('hidden');
+        state.lastOcrText = '';
+        state.lastResultText = data.description;
+      }
+
+      // Теги
+      const tagsSection = document.getElementById('tags-section');
+      tagsSection.innerHTML = '';
+      if (Array.isArray(data.tags) && data.tags.length > 0) {
+        data.tags.forEach(tag => {
+          const badge = document.createElement('span');
+          badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-mono bg-white/5 border border-white/10 text-slate-300';
+          badge.textContent = `#${tag.replace(/^#/, '')}`;
+          tagsSection.appendChild(badge);
+        });
+        tagsSection.classList.remove('hidden');
+      } else {
+        tagsSection.classList.add('hidden');
+      }
+    }
+
+    // Добавление записи в историю текущей сессии
+    function addToHistory(item) {
+      state.history.unshift({
+        id: Date.now(),
+        time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        ...item
+      });
+      if (state.history.length > 12) state.history.pop();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const grid = document.getElementById('history-grid');
+      const empty = document.getElementById('history-empty');
+      const count = document.getElementById('history-count');
+      const clearBtn = document.getElementById('clear-history-btn');
+
+      count.textContent = state.history.length;
+
+      if (state.history.length === 0) {
+        grid.classList.add('hidden');
+        empty.classList.remove('hidden');
+        clearBtn.classList.add('hidden');
+        return;
+      }
+
+      empty.classList.add('hidden');
+      grid.classList.remove('hidden');
+      grid.classList.add('grid');
+      clearBtn.classList.remove('hidden');
+      grid.innerHTML = '';
+
+      state.history.forEach(entry => {
+        const isBlip = entry.mode === 'BLIP Base';
+        const fullCopy = entry.ocr ? `${entry.text}\n\nТекст с фото:\n${entry.ocr}` : entry.text;
+
+        const card = document.createElement('div');
+        card.className = 'glass-card rounded-2xl p-3 flex items-start gap-3 hover:border-violet-400/40 transition cursor-pointer group';
+        card.title = 'Нажмите, чтобы скопировать результат';
+        card.onclick = () => copyTextToClipboard(fullCopy, 'Описание из истории скопировано!');
+
+        card.innerHTML = `
+          <img src="${entry.thumb}" alt="Миниатюра" class="w-16 h-16 rounded-xl object-cover bg-slate-950 border border-white/10 shrink-0" />
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-1 mb-1">
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded-md ${isBlip ? 'bg-violet-500/20 text-violet-300' : 'bg-cyan-500/20 text-cyan-300'}">
+                ${entry.mode}
+              </span>
+              <span class="text-[10px] font-mono text-slate-500">${entry.elapsed} с</span>
+            </div>
+            <p class="text-xs text-slate-200 line-clamp-2 leading-snug group-hover:text-white transition">
+              ${escapeHtml(entry.text)}
+            </p>
+            ${entry.ocr ? `<p class="text-[10px] font-mono text-cyan-400/80 truncate mt-1">OCR: ${escapeHtml(entry.ocr)}</p>` : ''}
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    window.clearHistory = function() {
+      state.history = [];
+      renderHistory();
+      showToast('История сессии очищена');
+    };
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
